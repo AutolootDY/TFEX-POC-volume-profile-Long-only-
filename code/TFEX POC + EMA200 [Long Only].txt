@@ -1,0 +1,90 @@
+//@version=6
+strategy('TFEX POC + EMA200 [Long Only]', overlay = true)
+
+// --- Parameters ---
+bins = input.int(50, title = 'Number of Bins', minval = 10)
+timeframe = input.timeframe('W', title = 'POC Timeframe')
+emaLength = input.int(200, title = 'EMA Length', minval = 1)
+
+tpPoints = input.int(10, title = 'Take Profit (Points)')
+contracts = input.int(2, title = 'Number of Contracts', minval = 1)
+
+// --- Calculate EMA ---
+ema200 = ta.ema(close, emaLength)
+
+// --- POC Calculation ---
+var float poc = na
+var array<float> volumeBins = array.new_float(bins, 0)
+
+highTF = request.security(syminfo.tickerid, timeframe, high)
+lowTF = request.security(syminfo.tickerid, timeframe, low)
+priceRange = highTF - lowTF
+binSize = priceRange / bins
+
+if bool(ta.change(time(timeframe)))
+    array.fill(volumeBins, 0)
+
+currentBin = math.floor((close - lowTF) / binSize)
+if currentBin >= 0 and currentBin < bins
+    array.set(volumeBins, currentBin, array.get(volumeBins, currentBin) + volume)
+
+var float maxVolume = 0
+var int maxIndex = 0
+for i = 0 to bins - 1 by 1
+    binVolume = array.get(volumeBins, i)
+    if binVolume > maxVolume
+        maxVolume := binVolume
+        maxIndex := i
+        maxIndex
+
+poc := lowTF + maxIndex * binSize
+
+// --- Trading Logic ---
+var float entryPrice = na
+var float tp1Price = na // ประกาศตัวแปร TP1 ไว้ด้านนอก
+var bool tp1Hit = false
+
+previousPoc = request.security(syminfo.tickerid, timeframe, poc[1])
+longCondition = poc > previousPoc and close > ema200
+
+if longCondition and strategy.position_size == 0
+    strategy.entry('Long', strategy.long, contracts)
+    entryPrice := na // Reset entry price for new position
+    tp1Hit := false
+    tp1Hit
+
+if strategy.position_size > 0 and na(entryPrice)
+    entryPrice := strategy.position_avg_price
+    entryPrice
+
+// คำนวณ TP1 Price
+if strategy.position_size > 0 and na(entryPrice) == false
+    tp1Price := entryPrice + tpPoints * syminfo.mintick
+    tp1Price
+else
+    tp1Price := na
+    tp1Price
+
+// --- TP and Exit Logic ---
+if strategy.position_size > 0 and close >= tp1Price and not tp1Hit
+    strategy.exit('TP1', from_entry = 'Long', qty_percent = 50, limit = tp1Price)
+    tp1Hit := true
+    tp1Hit
+
+if strategy.position_size > 0 and close < ema200
+    strategy.close('Long')
+
+// --- Plotting ---
+plot(ema200, color = color.blue, linewidth = 2, title = 'EMA 200')
+plot(poc, title = 'POC Line', color = color.red, style = plot.style_line, linewidth = 2)
+plot(entryPrice, color = color.yellow, style = plot.style_line, linewidth = 1, title = 'Entry Price')
+plot(tp1Price, color = color.green, style = plot.style_line, linewidth = 1, title = 'TP1 Level')
+
+// --- Add POC as Label ---
+if bar_index % 1 == 0
+    label.new(x = bar_index, y = poc, text = str.tostring(poc, '#.##'), color = color.red, style = label.style_circle, textcolor = color.black)
+
+// --- Add POC as Table ---
+var table pocTable = table.new(position.top_right, 1, 1, border_width = 1, border_color = color.white)
+if not na(poc)
+    table.cell(pocTable, 0, 0, str.tostring(poc, '#.##'), text_color = color.red, bgcolor = color.white)
